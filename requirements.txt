@@ -2,4 +2,6 @@ streamlit>=1.32
 pandas>=2.2
 openpyxl>=3.1
 requests>=2.31
-anthropic>=0.40
+anthropic==0.96.0
+httpx>=0.24.0
+pydantic>=2.0.0
