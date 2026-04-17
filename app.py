@@ -94,6 +94,19 @@ def load_data(url: str) -> pd.DataFrame:
         for col in ["입력일자", "계상일자", "영수일자", "청약일자"]:
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col], errors="coerce")
+        
+        # 매니저 코드 정규화 (float → int 문자열)
+        if '지원매니저코드' in df.columns:
+            def normalize_manager_code(code):
+                try:
+                    float_val = float(str(code).strip())
+                    if float_val == int(float_val):  # .0 형태라면
+                        return str(int(float_val))
+                    return str(code).strip()
+                except (ValueError, TypeError):
+                    return str(code).strip()
+            
+            df['지원매니저코드'] = df['지원매니저코드'].apply(normalize_manager_code)
                 
         return df
         
@@ -108,7 +121,7 @@ def load_data(url: str) -> pd.DataFrame:
 # 매니저 단위 필터
 # ─────────────────────────────────────────────
 def filter_by_manager(df: pd.DataFrame, manager_code: str) -> pd.DataFrame:
-    """매니저 코드로 필터링 (다양한 포맷 처리)"""
+    """매니저 코드로 필터링 (float 형태 코드 처리)"""
     clean_input = str(manager_code).strip()
     
     # 여러 방식으로 매칭 시도
@@ -117,19 +130,26 @@ def filter_by_manager(df: pd.DataFrame, manager_code: str) -> pd.DataFrame:
     # 1. 정확한 문자열 매칭
     conditions.append(df["지원매니저코드"].astype(str).str.strip() == clean_input)
     
-    # 2. 숫자로 변환해서 매칭 (앞뒤 0 무시)
-    try:
-        input_num = int(clean_input)
-        conditions.append(df["지원매니저코드"].astype(str).str.strip().apply(
-            lambda x: int(x) == input_num if x.isdigit() else False
-        ))
-    except ValueError:
-        pass
+    # 2. float 형태 처리 (317004114.0 → 317004114)
+    def normalize_code(code):
+        try:
+            # float로 변환 후 정수 부분만 추출
+            float_val = float(str(code).strip())
+            if float_val == int(float_val):  # 소수점 이하가 0인 경우
+                return str(int(float_val))
+            return str(code).strip()
+        except (ValueError, TypeError):
+            return str(code).strip()
     
-    # 3. 언더스코어나 특수문자 제거 후 매칭
-    clean_input_alphanum = ''.join(c for c in clean_input if c.isalnum())
-    if clean_input_alphanum != clean_input:
-        conditions.append(df["지원매니저코드"].astype(str).str.replace(r'[^a-zA-Z0-9]', '', regex=True) == clean_input_alphanum)
+    normalized_codes = df["지원매니저코드"].apply(normalize_code)
+    conditions.append(normalized_codes == clean_input)
+    
+    # 3. 입력값을 float 형태로도 비교 (317004114 → 317004114.0)
+    try:
+        input_as_float = f"{clean_input}.0"
+        conditions.append(df["지원매니저코드"].astype(str).str.strip() == input_as_float)
+    except:
+        pass
     
     # 조건 중 하나라도 만족하면 선택
     combined_condition = conditions[0]
