@@ -108,7 +108,35 @@ def load_data(url: str) -> pd.DataFrame:
 # 매니저 단위 필터
 # ─────────────────────────────────────────────
 def filter_by_manager(df: pd.DataFrame, manager_code: str) -> pd.DataFrame:
-    return df[df["지원매니저코드"].astype(str).str.strip() == str(manager_code).strip()].copy()
+    """매니저 코드로 필터링 (다양한 포맷 처리)"""
+    clean_input = str(manager_code).strip()
+    
+    # 여러 방식으로 매칭 시도
+    conditions = []
+    
+    # 1. 정확한 문자열 매칭
+    conditions.append(df["지원매니저코드"].astype(str).str.strip() == clean_input)
+    
+    # 2. 숫자로 변환해서 매칭 (앞뒤 0 무시)
+    try:
+        input_num = int(clean_input)
+        conditions.append(df["지원매니저코드"].astype(str).str.strip().apply(
+            lambda x: int(x) == input_num if x.isdigit() else False
+        ))
+    except ValueError:
+        pass
+    
+    # 3. 언더스코어나 특수문자 제거 후 매칭
+    clean_input_alphanum = ''.join(c for c in clean_input if c.isalnum())
+    if clean_input_alphanum != clean_input:
+        conditions.append(df["지원매니저코드"].astype(str).str.replace(r'[^a-zA-Z0-9]', '', regex=True) == clean_input_alphanum)
+    
+    # 조건 중 하나라도 만족하면 선택
+    combined_condition = conditions[0]
+    for cond in conditions[1:]:
+        combined_condition = combined_condition | cond
+    
+    return df[combined_condition].copy()
 
 # ─────────────────────────────────────────────
 # LLM: 자연어 → 필터 스펙 (JSON)
@@ -362,14 +390,53 @@ def login_ui():
         except Exception as e:
             st.error(f"데이터 로드 실패: {e}")
             return
-        mine = filter_by_manager(df, code.strip())
-        if mine.empty:
-            st.error(f"'{code}' 매니저 산하 데이터가 없습니다. 코드를 확인해주세요.")
-            return
-        manager_name = mine["지원매니저명"].dropna().iloc[0] if "지원매니저명" in mine.columns else ""
-        st.session_state["manager_code"] = code.strip()
-        st.session_state["manager_name"] = manager_name
-        st.rerun()
+            
+        # 매니저 코드 디버깅
+        all_managers = df['지원매니저코드'].dropna().unique()
+        st.subheader("🔍 매니저 코드 확인")
+        
+        # 입력한 코드와 유사한 코드 찾기
+        input_code = code.strip()
+        similar_codes = []
+        
+        for mgr_code in all_managers:
+            mgr_str = str(mgr_code).strip()
+            # 완전 일치
+            if mgr_str == input_code:
+                mine = filter_by_manager(df, input_code)
+                manager_name = mine["지원매니저명"].dropna().iloc[0] if "지원매니저명" in mine.columns and not mine.empty else ""
+                st.session_state["manager_code"] = input_code
+                st.session_state["manager_name"] = manager_name
+                st.rerun()
+                return
+            # 부분 일치 (끝부분)
+            if mgr_str.endswith(input_code) or input_code in mgr_str:
+                similar_codes.append(mgr_str)
+        
+        # 매니저 코드를 찾지 못한 경우
+        st.error(f"'{input_code}' 매니저를 찾을 수 없습니다.")
+        
+        if similar_codes:
+            st.info("유사한 매니저 코드:")
+            for sim_code in similar_codes[:10]:  # 최대 10개만 표시
+                mgr_data = df[df['지원매니저코드'].astype(str).str.strip() == sim_code]
+                mgr_name = mgr_data['지원매니저명'].dropna().iloc[0] if not mgr_data.empty else "이름없음"
+                agent_count = mgr_data['대리점설계사조직코드'].nunique()
+                st.write(f"- **{sim_code}** ({mgr_name}) - 산하 {agent_count}명")
+        
+        # 전체 매니저 목록 표시 (처음 20명)
+        with st.expander("전체 매니저 목록 (처음 20명)"):
+            manager_summary = df.groupby(['지원매니저코드', '지원매니저명'])['대리점설계사조직코드'].nunique().reset_index()
+            manager_summary.columns = ['매니저코드', '매니저명', '산하설계사수']
+            manager_summary = manager_summary.sort_values('산하설계사수', ascending=False).head(20)
+            
+            st.dataframe(
+                manager_summary,
+                use_container_width=True,
+                hide_index=True
+            )
+        
+        return
 
 def main_ui():
     code = st.session_state["manager_code"]
