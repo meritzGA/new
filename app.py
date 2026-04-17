@@ -64,15 +64,45 @@ def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 def load_data(url: str) -> pd.DataFrame:
     if not url:
         raise ValueError("DATA_URL이 설정되지 않았습니다. .streamlit/secrets.toml 에 DATA_URL 을 추가하세요.")
-    r = requests.get(url, timeout=60)
-    r.raise_for_status()
-    df = pd.read_excel(io.BytesIO(r.content))
-    df = clean_dataframe(df)
-    # 날짜 컬럼 보정
-    for col in ["입력일자", "계상일자", "영수일자", "청약일자"]:
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors="coerce")
-    return df
+    
+    try:
+        r = requests.get(url, timeout=60)
+        r.raise_for_status()
+        
+        # GitHub에서 HTML 페이지를 받았는지 확인
+        content_type = r.headers.get('content-type', '').lower()
+        if 'text/html' in content_type:
+            raise ValueError(f"GitHub URL이 HTML 페이지를 반환했습니다. URL을 확인하세요: {url}")
+        
+        # Excel 파일 읽기 (엔진 명시)
+        df = pd.read_excel(io.BytesIO(r.content), engine='openpyxl')
+        
+        if df.empty:
+            raise ValueError("Excel 파일이 비어있습니다.")
+            
+        df = clean_dataframe(df)
+        
+        # 필수 컬럼 확인
+        required_cols = ['대리점설계사조직코드', '대리점설계사명', '지원매니저코드', '월납환산보험료', '건수']
+        missing_cols = [c for c in required_cols if c not in df.columns]
+        if missing_cols:
+            st.warning(f"필수 컬럼이 없습니다: {missing_cols}")
+            st.info("사용 가능한 컬럼들:")
+            st.write(list(df.columns))
+            
+        # 날짜 컬럼 보정
+        for col in ["입력일자", "계상일자", "영수일자", "청약일자"]:
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col], errors="coerce")
+                
+        return df
+        
+    except requests.exceptions.RequestException as e:
+        raise ValueError(f"URL 접근 실패: {e}")
+    except Exception as e:
+        # 상세한 에러 정보 제공
+        raise ValueError(f"Excel 파일 읽기 실패: {e}")
+
 
 # ─────────────────────────────────────────────
 # 매니저 단위 필터
@@ -292,6 +322,37 @@ def apply_agent_filters(agg: pd.DataFrame, filters: list) -> pd.DataFrame:
 def login_ui():
     st.title("🔍 사용인 조회")
     st.caption("지원매니저 전용")
+    
+    # URL 디버깅 정보
+    if st.checkbox("URL 디버깅 정보 표시"):
+        st.subheader("🔧 설정 확인")
+        data_url = _safe_secret("DATA_URL", "설정되지 않음")
+        api_key = _safe_secret("ANTHROPIC_API_KEY", "설정되지 않음")
+        
+        st.text(f"DATA_URL: {data_url}")
+        st.text(f"ANTHROPIC_API_KEY: {'설정됨' if api_key and api_key != '설정되지 않음' else '설정되지 않음'}")
+        
+        if data_url and data_url != "설정되지 않음":
+            if st.button("URL 연결 테스트"):
+                try:
+                    r = requests.get(data_url, timeout=10)
+                    st.success(f"연결 성공! Status: {r.status_code}")
+                    st.info(f"Content-Type: {r.headers.get('content-type', 'unknown')}")
+                    st.info(f"Content-Length: {len(r.content):,} bytes")
+                    
+                    # 처음 100자 미리보기
+                    preview = r.content[:100]
+                    if b'<html' in preview.lower():
+                        st.error("⚠️ HTML 페이지를 받았습니다. Raw URL이 아닙니다!")
+                    elif preview.startswith(b'PK'):  # Excel 파일 시그니처
+                        st.success("✅ Excel 파일로 보입니다!")
+                    else:
+                        st.warning(f"파일 형식 불명: {preview[:50]}...")
+                        
+                except Exception as e:
+                    st.error(f"연결 실패: {e}")
+        st.divider()
+    
     with st.form("login"):
         code = st.text_input("지원매니저 코드", placeholder="예: 320010154")
         ok = st.form_submit_button("로그인", use_container_width=True)
