@@ -45,6 +45,20 @@ ANTHROPIC_API_KEY = "sk-ant-..."
      `https://<TOKEN>@raw.githubusercontent.com/...` 형태
    - 방법 C: GitHub API 로 Authorization 헤더 사용 (app.py 수정 필요)
 
+## 문제 해결
+
+### Anthropic 라이브러리 import 에러
+- `requirements.txt`에서 버전 명시 확인: `anthropic==0.96.0`
+- Streamlit Cloud에서 재배포 시도 (Manage app > Reboot)
+- ANTHROPIC_API_KEY 없어도 **기본 패턴 매칭**으로 동작합니다:
+  - "10만원 미만", "30만원 이상" → 금액 필터
+  - "자기계약 빼고", "실손만" → 조건 필터
+
+### 데이터 로딩 에러
+- `DATA_URL`이 올바른지 확인 (브라우저에서 직접 접근 가능한지)
+- Private repo라면 Personal Access Token 포함 필요
+- Streamlit Cloud > Clear cache 시도
+
 ## 데이터 일일 업데이트
 
 매일 새 데이터를 만들 때:
