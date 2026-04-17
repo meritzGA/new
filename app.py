@@ -274,7 +274,7 @@ def call_llm(user_prompt: str, api_key: str) -> dict:
     try:
         client = Anthropic(api_key=api_key)
         resp = client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model="claude-sonnet-4-5",  # Updated to working model
             max_tokens=1024,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_prompt}],
